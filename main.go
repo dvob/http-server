@@ -31,6 +31,7 @@ func main() {
 	flag.BoolVar(&enableTLS, "tls", false, "Enable TLS")
 	flag.BoolVar(&cfg.ShowHeaders, "header", true, "show headers")
 	flag.BoolVar(&hecMode, "hec", false, "HTTP Event Collector Mode")
+	flag.StringVar(&cfg.Content, "content", "", "Body which gets returned")
 	flag.StringVar(&tlsCert, "cert", "tls.crt", "TLS certificate")
 	flag.StringVar(&tlsKey, "key", "tls.key", "TLS key")
 	flag.StringVar(&listenAddr, "addr", ":8080", "Listen address")
@@ -54,6 +55,7 @@ func main() {
 type Config struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
+	Content     string
 	ShowHeaders bool
 }
 
@@ -65,6 +67,8 @@ func RawHandler(cfg Config) http.HandlerFunc {
 		if err != nil {
 			fmt.Fprintln(cfg.Stderr, err)
 		}
+
+		writeContent(cfg, w)
 
 		return
 	}
@@ -87,6 +91,9 @@ func JSONHandler(cfg Config) http.HandlerFunc {
 			fmt.Fprintln(cfg.Stderr, err)
 			return
 		}
+
+		writeContent(cfg, w)
+
 	}
 
 }
@@ -129,6 +136,12 @@ func handleHeader(cfg Config, r *http.Request) {
 		return
 	}
 	fmt.Fprintln(cfg.Stdout, string(header))
+}
+
+func writeContent(cfg Config, w http.ResponseWriter) {
+	if cfg.Content != "" {
+		fmt.Fprintf(w, cfg.Content)
+	}
 }
 
 func handleJSON() {
