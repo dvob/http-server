@@ -31,6 +31,7 @@ func main() {
 	flag.BoolVar(&enableTLS, "tls", false, "Enable TLS")
 	flag.BoolVar(&cfg.ShowHeaders, "header", true, "show headers")
 	flag.BoolVar(&hecMode, "hec", false, "HTTP Event Collector Mode")
+	flag.BoolVar(&cfg.Hostname, "hostname", false, "Append hostname to content")
 	flag.StringVar(&cfg.Content, "content", "", "Body which gets returned")
 	flag.StringVar(&tlsCert, "cert", "tls.crt", "TLS certificate")
 	flag.StringVar(&tlsKey, "key", "tls.key", "TLS key")
@@ -56,6 +57,7 @@ type Config struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
 	Content     string
+	Hostname    bool
 	ShowHeaders bool
 }
 
@@ -139,8 +141,20 @@ func handleHeader(cfg Config, r *http.Request) {
 }
 
 func writeContent(cfg Config, w http.ResponseWriter) {
+	content := ""
+
 	if cfg.Content != "" {
-		fmt.Fprintf(w, cfg.Content)
+		content = cfg.Content
+	}
+
+	if cfg.Hostname {
+		hostname, _ := os.Hostname()
+		content = content + hostname
+	}
+	fmt.Println("C:", content)
+
+	if content != "" {
+		fmt.Fprintf(w, content)
 	}
 }
 
