@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,7 +32,7 @@ func main() {
 	flag.BoolVar(&enableTLS, "tls", false, "Enable TLS")
 	flag.BoolVar(&cfg.ShowHeaders, "header", true, "show headers")
 	flag.BoolVar(&hecMode, "hec", false, "HTTP Event Collector Mode")
-	flag.BoolVar(&cfg.Hostname, "hostname", false, "Append hostname to content")
+	flag.BoolVar(&cfg.Info, "info", false, "Return request info as content")
 	flag.StringVar(&cfg.Content, "content", "", "Body which gets returned")
 	flag.StringVar(&tlsCert, "cert", "tls.crt", "TLS certificate")
 	flag.StringVar(&tlsKey, "key", "tls.key", "TLS key")
@@ -57,7 +58,7 @@ type Config struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
 	Content     string
-	Hostname    bool
+	Info        bool
 	ShowHeaders bool
 }
 
@@ -70,7 +71,7 @@ func RawHandler(cfg Config) http.HandlerFunc {
 			fmt.Fprintln(cfg.Stderr, err)
 		}
 
-		writeContent(cfg, w)
+		writeContent(cfg, r, w)
 
 		return
 	}
@@ -94,7 +95,7 @@ func JSONHandler(cfg Config) http.HandlerFunc {
 			return
 		}
 
-		writeContent(cfg, w)
+		writeContent(cfg, r, w)
 
 	}
 
@@ -140,22 +141,36 @@ func handleHeader(cfg Config, r *http.Request) {
 	fmt.Fprintln(cfg.Stdout, string(header))
 }
 
-func writeContent(cfg Config, w http.ResponseWriter) {
+func writeContent(cfg Config, r *http.Request, w http.ResponseWriter) {
 	content := ""
 
 	if cfg.Content != "" {
-		content = cfg.Content
+		content = cfg.Content + "\n"
 	}
 
-	if cfg.Hostname {
-		hostname, _ := os.Hostname()
-		content = content + hostname
+	if cfg.Info {
+		content = content + getInfo(r)
 	}
-	fmt.Println("C:", content)
 
 	if content != "" {
 		fmt.Fprintf(w, content)
 	}
+}
+
+func getInfo(r *http.Request) string {
+	info := &bytes.Buffer{}
+	hostname, _ := os.Hostname()
+	fmt.Fprintf(info, "hostname: '%s'\n", hostname)
+
+	header, err := httputil.DumpRequest(r, false)
+	if err != nil {
+		header = []byte{}
+	}
+	fmt.Fprintf(info, "http request:\n")
+	info.Write(header)
+	fmt.Fprintf(info, "---\n")
+
+	return info.String()
 }
 
 func handleJSON() {
