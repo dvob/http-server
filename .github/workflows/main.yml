@@ -26,10 +26,10 @@ jobs:
     needs: test
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     env:
-      IMAGE: docker.io/dsbrng25b/http-server
+      IMAGE: docker.io/dvob/http-server
     steps:
       - name: Docker Login
-        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login docker.io -u dsbrng25b --password-stdin
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login docker.io -u dvob --password-stdin
 
       - uses: actions/setup-go@v1
         with:

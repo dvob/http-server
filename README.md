@@ -32,7 +32,7 @@ By default it uses `tls.key` and `tls.cert` in the current directory. This can b
 ## Docker
 * Run
 ```
-docker run -p 8080:8080 --rm dsbrng25b/http-server -hec
+docker run -p 8080:8080 --rm dvob/http-server -hec
 ```
 
 * Test
