@@ -32,7 +32,7 @@ jobs:
 
       - name: Install Tools
         run: |
-          go get github.com/dvob/sko@latest
+          go install github.com/dvob/sko@latest
           echo "$( go env GOPATH )/bin" >> $GITHUB_PATH
 
       - name: Docker Hub Release
