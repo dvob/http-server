@@ -36,6 +36,8 @@ func main() {
 	flag.BoolVar(&cfg.ShowHeaders, "header", true, "show headers")
 	flag.BoolVar(&hecMode, "hec", false, "HTTP Event Collector Mode")
 	flag.BoolVar(&cfg.Info, "info", false, "Return request info as content")
+	flag.BoolVar(&cfg.EnableTimeout, "timeout", false, "enable timeout endpoint (e.g. */timeout?duration=12s)")
+	flag.BoolVar(&cfg.EnableData, "data", false, "Enable data endpoint (e.g */data?size=123)")
 	flag.StringVar(&cfg.Content, "content", "", "Body which gets returned")
 	flag.StringVar(&tlsCert, "cert", "tls.crt", "TLS certificate")
 	flag.StringVar(&tlsKey, "key", "tls.key", "TLS key")
@@ -58,22 +60,24 @@ func main() {
 }
 
 type Config struct {
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Content     string
-	Info        bool
-	ShowHeaders bool
+	Stdout        io.Writer
+	Stderr        io.Writer
+	Content       string
+	Info          bool
+	ShowHeaders   bool
+	EnableTimeout bool
+	EnableData    bool
 }
 
 func RawHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handleHeader(cfg, r)
 
-		if strings.HasPrefix(r.URL.Path, "/timeout") {
+		if cfg.EnableTimeout && strings.HasSuffix(r.URL.Path, "/timeout") {
 			timeoutHandler(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/data") {
+		if cfg.EnableData && strings.HasSuffix(r.URL.Path, "/data") {
 			dataHandler(w, r)
 			return
 		}
