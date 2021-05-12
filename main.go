@@ -172,6 +172,3 @@ func getInfo(r *http.Request) string {
 
 	return info.String()
 }
-
-func handleJSON() {
-}
