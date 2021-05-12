@@ -11,6 +11,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 )
 
 func main() {
@@ -65,6 +68,15 @@ type Config struct {
 func RawHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handleHeader(cfg, r)
+
+		if strings.HasPrefix(r.URL.Path, "/timeout") {
+			timeoutHandler(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/data") {
+			dataHandler(w, r)
+			return
+		}
 
 		_, err := io.Copy(cfg.Stdout, r.Body)
 		if err != nil {
@@ -139,6 +151,75 @@ func handleHeader(cfg Config, r *http.Request) {
 		return
 	}
 	fmt.Fprintln(cfg.Stdout, string(header))
+}
+
+func timeoutHandler(w http.ResponseWriter, r *http.Request) {
+	duration, err := time.ParseDuration(r.URL.Query().Get("duration"))
+	if err != nil {
+		http.Error(w, "failed to parse duration: "+err.Error(), 400)
+		return
+	}
+	time.Sleep(duration)
+	return
+}
+
+func dataHandler(w http.ResponseWriter, r *http.Request) {
+	var err error
+	sizeStr := r.URL.Query().Get("size")
+	size := 0
+	if sizeStr != "" {
+		size, err = strconv.Atoi(sizeStr)
+		if err != nil {
+			http.Error(w, "invalid size: "+err.Error(), 400)
+			return
+		}
+	}
+
+	switch r.Method {
+	case "POST":
+		received, err := io.Copy(os.Stdout, r.Body)
+		if err != nil {
+			log.Printf("failed to read request body: %s", err)
+			http.Error(w, "failed to read body: "+err.Error(), 400)
+		}
+		fmt.Fprintln(w, strconv.FormatInt(received, 10))
+		return
+	case "GET":
+		_, err := io.Copy(w, newNBytesReader(size))
+		if err != nil {
+			http.Error(w, "failed to send data", 500)
+			return
+		}
+	default:
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	return
+}
+
+func newNBytesReader(size int) *nBytesReader {
+	return &nBytesReader{
+		n: size,
+	}
+}
+
+type nBytesReader struct {
+	// total bytes to return
+	n int
+	// already returned bytes
+	sent int
+}
+
+func (n *nBytesReader) Read(p []byte) (int, error) {
+	sent := 0
+	for ; sent < len(p) && n.sent < n.n; sent++ {
+		p[sent] = 'A'
+		n.sent++
+	}
+	if n.sent == n.n {
+		return sent, io.EOF
+	}
+	return sent, nil
 }
 
 func writeContent(cfg Config, r *http.Request, w http.ResponseWriter) {
