@@ -2,21 +2,198 @@ package main
 
 import (
 	"bufio"
-	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 )
 
+type serverConfig struct {
+	addr              string
+	readTimeout       time.Duration
+	readHeaderTimeout time.Duration
+	writeTimeout      time.Duration
+	idleTimeout       time.Duration
+	maxHeaderBytes    int
+	tlsConfig         tlsConfig
+	middleware        string
+	handler           string
+}
+
+func newDefaultServer() serverConfig {
+	return serverConfig{
+		tlsConfig: newDefaultTLSConfig(),
+	}
+}
+
+func (s *serverConfig) bindFlags(fs *flag.FlagSet) {
+	fs.StringVar(&s.addr, "addr", s.addr, "listen addr. if tls configures this defaults to ':443' otherwise ':80'")
+	fs.DurationVar(&s.readTimeout, "read-timeout", s.readTimeout, "read timeout")
+	fs.DurationVar(&s.readHeaderTimeout, "read-header-timeout", s.readHeaderTimeout, "read header timeout")
+	fs.DurationVar(&s.writeTimeout, "write-timeout", s.writeTimeout, "write timeout")
+	fs.DurationVar(&s.idleTimeout, "idle-timeout", s.idleTimeout, "idle timeout")
+	fs.StringVar(&s.handler, "handler", s.handler, "handler")
+	fs.StringVar(&s.middleware, "middleware", s.middleware, "middleware")
+	s.tlsConfig.bindFlags(fs)
+}
+
+func (s *serverConfig) getHandler() (http.Handler, error) {
+	var (
+		handler         http.HandlerFunc
+		middlewareChain []middleware
+	)
+
+	handler = okHandler
+
+	if s.middleware == "" {
+		// set default middleware
+		middlewareChain = []middleware{
+			requestLogger,
+		}
+	} else {
+		for _, middlewareName := range strings.Split(s.middleware, ",") {
+			middleware, ok := middlewares[middlewareName]
+			if !ok {
+				return nil, fmt.Errorf("middleware '%s' does not exist", middlewareName)
+			}
+			middlewareChain = append(middlewareChain, middleware)
+		}
+	}
+
+	if s.handler != "" {
+		var ok bool
+		handler, ok = handlers[s.handler]
+		if !ok {
+			return nil, fmt.Errorf("handler '%s' does not exist", s.handler)
+		}
+	}
+
+	return chain(middlewareChain...)(handler), nil
+}
+
+func (s *serverConfig) getServer() (*http.Server, error) {
+	tlsConfig, err := s.tlsConfig.getConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	handler, err := s.getHandler()
+	if err != nil {
+		return nil, err
+	}
+
+	// set default addr
+	if s.addr == "" {
+		if tlsConfig == nil {
+			s.addr = ":80"
+		} else {
+			s.addr = ":443"
+		}
+	}
+
+	srv := &http.Server{
+		Addr:              s.addr,
+		Handler:           handler,
+		TLSConfig:         tlsConfig,
+		ReadTimeout:       s.readTimeout,
+		ReadHeaderTimeout: s.readHeaderTimeout,
+		WriteTimeout:      s.writeTimeout,
+		IdleTimeout:       s.idleTimeout,
+		MaxHeaderBytes:    s.maxHeaderBytes,
+	}
+	return srv, nil
+}
+
+func (s *serverConfig) run() error {
+	srv, err := s.getServer()
+	if err != nil {
+		return err
+	}
+	if srv.TLSConfig == nil {
+		return srv.ListenAndServe()
+	} else {
+		// certificates are explicitly configured in the TLSConfig
+		return srv.ListenAndServeTLS("", "")
+	}
+}
+
+type tlsConfig struct {
+	cert     string
+	key      string
+	hosts    string
+	cacheDir string
+}
+
+func newDefaultTLSConfig() tlsConfig {
+	return tlsConfig{
+		cacheDir: "cert-dir",
+	}
+}
+
+func (t *tlsConfig) bindFlags(fs *flag.FlagSet) {
+	fs.StringVar(&t.cert, "tls-cert", t.cert, "path to PEM encodeded certificate")
+	fs.StringVar(&t.key, "tls-key", t.key, "path to PEM encodeded key")
+	fs.StringVar(&t.hosts, "tls-hosts", t.hosts, "enables automatic certificate management with ACME (Let's Encrypt) for the specified list of comma-seperated hostnames")
+	fs.StringVar(&t.cacheDir, "tls-cache-dir", t.cacheDir, "cache dir for ACME certificates")
+}
+
+func (t *tlsConfig) getConfig() (*tls.Config, error) {
+	// ACME (Let's Encrypt)
+	if t.hosts != "" {
+		hosts := strings.Split(t.hosts, ",")
+		manager := autocert.Manager{
+			Cache:      autocert.DirCache(t.cacheDir),
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(hosts...),
+		}
+		return manager.TLSConfig(), nil
+	}
+
+	// Local Certificate File
+	if t.cert != "" || t.key != "" {
+		cert, err := tls.LoadX509KeyPair(t.cert, t.key)
+		if err != nil {
+			return nil, err
+		}
+		return &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}, nil
+	}
+
+	// TLS disabled
+	return nil, nil
+}
+
+func run() error {
+	serverConfig := newDefaultServer()
+	serverConfig.bindFlags(flag.CommandLine)
+	flag.Parse()
+
+	err := serverConfig.run()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
+	err := run()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func old_main() {
 	var (
 		jsonMode   bool
 		hecMode    bool
@@ -43,20 +220,6 @@ func main() {
 	flag.StringVar(&tlsKey, "key", "tls.key", "TLS key")
 	flag.StringVar(&listenAddr, "addr", ":8080", "Listen address")
 	flag.Parse()
-
-	if jsonMode {
-		http.HandleFunc("/", JSONHandler(cfg))
-	} else if hecMode {
-		http.HandleFunc("/", HECHandler(cfg))
-	} else {
-		http.HandleFunc("/", RawHandler(cfg))
-	}
-
-	if enableTLS {
-		log.Fatal(http.ListenAndServeTLS(listenAddr, tlsCert, tlsKey, nil))
-	} else {
-		log.Fatal(http.ListenAndServe(listenAddr, nil))
-	}
 }
 
 type Config struct {
@@ -71,10 +234,8 @@ type Config struct {
 
 func RawHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		handleHeader(cfg, r)
 
 		if cfg.EnableTimeout && strings.HasSuffix(r.URL.Path, "/timeout") {
-			timeoutHandler(w, r)
 			return
 		}
 		if cfg.EnableData && strings.HasSuffix(r.URL.Path, "/data") {
@@ -87,40 +248,12 @@ func RawHandler(cfg Config) http.HandlerFunc {
 			fmt.Fprintln(cfg.Stderr, err)
 		}
 
-		writeContent(cfg, r, w)
-
 		return
 	}
 }
 
-func JSONHandler(cfg Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		handleHeader(cfg, r)
-
-		payload := make(map[string]interface{})
-		err := json.NewDecoder(r.Body).Decode(&payload)
-		if err != nil {
-			fmt.Fprintln(cfg.Stderr, err)
-			return
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		err = enc.Encode(payload)
-		if err != nil {
-			fmt.Fprintln(cfg.Stderr, err)
-			return
-		}
-
-		writeContent(cfg, r, w)
-
-	}
-
-}
-
 func HECHandler(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		handleHeader(cfg, r)
-
 		scanner := bufio.NewScanner(r.Body)
 		for scanner.Scan() {
 			payload := make(map[string]interface{})
@@ -143,28 +276,6 @@ func HECHandler(cfg Config) http.HandlerFunc {
 		}
 		return
 	}
-}
-
-func handleHeader(cfg Config, r *http.Request) {
-	if !cfg.ShowHeaders {
-		return
-	}
-	header, err := httputil.DumpRequest(r, false)
-	if err != nil {
-		fmt.Fprintln(cfg.Stderr, err)
-		return
-	}
-	fmt.Fprintln(cfg.Stdout, string(header))
-}
-
-func timeoutHandler(w http.ResponseWriter, r *http.Request) {
-	duration, err := time.ParseDuration(r.URL.Query().Get("duration"))
-	if err != nil {
-		http.Error(w, "failed to parse duration: "+err.Error(), 400)
-		return
-	}
-	time.Sleep(duration)
-	return
 }
 
 func dataHandler(w http.ResponseWriter, r *http.Request) {
@@ -224,36 +335,4 @@ func (n *nBytesReader) Read(p []byte) (int, error) {
 		return sent, io.EOF
 	}
 	return sent, nil
-}
-
-func writeContent(cfg Config, r *http.Request, w http.ResponseWriter) {
-	content := ""
-
-	if cfg.Content != "" {
-		content = cfg.Content + "\n"
-	}
-
-	if cfg.Info {
-		content = content + getInfo(r)
-	}
-
-	if content != "" {
-		fmt.Fprintf(w, content)
-	}
-}
-
-func getInfo(r *http.Request) string {
-	info := &bytes.Buffer{}
-	hostname, _ := os.Hostname()
-	fmt.Fprintf(info, "hostname: '%s'\n", hostname)
-
-	header, err := httputil.DumpRequest(r, false)
-	if err != nil {
-		header = []byte{}
-	}
-	fmt.Fprintf(info, "http request:\n")
-	info.Write(header)
-	fmt.Fprintf(info, "---\n")
-
-	return info.String()
 }
