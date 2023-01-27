@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -27,6 +28,7 @@ type serverConfig struct {
 	tlsConfig         tlsConfig
 	middleware        string
 	handler           string
+	connLog           bool
 }
 
 func newDefaultServer() serverConfig {
@@ -41,6 +43,7 @@ func (s *serverConfig) bindFlags(fs *flag.FlagSet) {
 	fs.DurationVar(&s.readHeaderTimeout, "read-header-timeout", s.readHeaderTimeout, "read header timeout")
 	fs.DurationVar(&s.writeTimeout, "write-timeout", s.writeTimeout, "write timeout")
 	fs.DurationVar(&s.idleTimeout, "idle-timeout", s.idleTimeout, "idle timeout")
+	fs.BoolVar(&s.connLog, "conn-log", s.connLog, "enable connection log")
 	fs.StringVar(&s.handler, "handler", s.handler, "handler")
 	fs.StringVar(&s.middleware, "middleware", s.middleware, "middleware")
 	s.tlsConfig.bindFlags(fs)
@@ -100,6 +103,22 @@ func (s *serverConfig) getServer() (*http.Server, error) {
 		}
 	}
 
+	var connStateFn func(net.Conn, http.ConnState)
+	if s.connLog {
+		connStateFn = func(c net.Conn, s http.ConnState) {
+			if s == http.StateIdle || s == http.StateActive {
+				return
+			}
+			log.Printf("%s %s", s, c.RemoteAddr())
+			//if s == http.StateNew {
+			//	tcpConn, ok := c.(*net.TCPConn)
+			//	if ok {
+			//		tcpConn.SetKeepAlive(false)
+			//	}
+			//}
+		}
+	}
+
 	srv := &http.Server{
 		Addr:              s.addr,
 		Handler:           handler,
@@ -109,6 +128,7 @@ func (s *serverConfig) getServer() (*http.Server, error) {
 		WriteTimeout:      s.writeTimeout,
 		IdleTimeout:       s.idleTimeout,
 		MaxHeaderBytes:    s.maxHeaderBytes,
+		ConnState:         connStateFn,
 	}
 	return srv, nil
 }
