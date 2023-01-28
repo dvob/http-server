@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"time"
+
+	"github.com/felixge/httpsnoop"
 )
 
 var middlewares = map[string]middleware{
 	"timeout": timeout,
-	"log":     requestLogger,
+	"req":     dumpRequest,
+	"log":     logRequest,
 	"json":    jsonLogger,
 }
 
@@ -44,7 +47,21 @@ func timeout(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func requestLogger(next http.HandlerFunc) http.HandlerFunc {
+func logRequest(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m := httpsnoop.CaptureMetrics(next, w, r)
+		log.Printf(
+			"src=%s method=%s url=%s code=%d dt=%s written=%d",
+			r.RemoteAddr,
+			r.Method,
+			r.URL,
+			m.Code,
+			m.Duration,
+			m.Written,
+		)
+	}
+}
+func dumpRequest(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req, _ := httputil.DumpRequest(r, false)
 		log.Print(string(req))

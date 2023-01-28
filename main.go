@@ -60,7 +60,7 @@ func (s *serverConfig) getHandler() (http.Handler, error) {
 	if s.middleware == "" {
 		// set default middleware
 		middlewareChain = []middleware{
-			requestLogger,
+			dumpRequest,
 		}
 	} else {
 		for _, middlewareName := range strings.Split(s.middleware, ",") {
