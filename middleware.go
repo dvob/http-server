@@ -55,8 +55,8 @@ func requestLogger(next http.HandlerFunc) http.HandlerFunc {
 func jsonLogger(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const maxSize = 1_000_000 // 1MB
-		log.Print(r.ContentLength, maxSize)
-		if r.ContentLength < 0 || r.ContentLength > maxSize {
+		// -1 means chunked
+		if r.ContentLength <= 0 || r.ContentLength > maxSize {
 			next(w, r)
 			return
 		}
