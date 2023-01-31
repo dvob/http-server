@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dvob/http-server/config"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -38,7 +39,7 @@ func newDefaultServer() serverConfig {
 }
 
 func (s *serverConfig) bindFlags(fs *flag.FlagSet) {
-	fs.StringVar(&s.addr, "addr", s.addr, "listen addr. if tls configures this defaults to ':443' otherwise ':80'")
+	fs.StringVar(&s.addr, "addr", s.addr, "listen address. if tls is configured this defaults to ':443' otherwise to ':80'")
 	fs.DurationVar(&s.readTimeout, "read-timeout", s.readTimeout, "read timeout")
 	fs.DurationVar(&s.readHeaderTimeout, "read-header-timeout", s.readHeaderTimeout, "read header timeout")
 	fs.DurationVar(&s.writeTimeout, "write-timeout", s.writeTimeout, "write timeout")
@@ -194,11 +195,25 @@ func (t *tlsConfig) getConfig() (*tls.Config, error) {
 }
 
 func run() error {
+	// fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	// fs.Usage = func() {
+	// 	// TODO: extend with description of handlers and middlewares
+	// 	fs.PrintDefaults()
+	// }
+	// fs.Parse(os.Args[1:])
+
 	serverConfig := newDefaultServer()
 	serverConfig.bindFlags(flag.CommandLine)
 	flag.Parse()
 
-	err := serverConfig.run()
+	cfg, err := config.ParseArgs(flag.Args())
+	if err != nil {
+		return err
+	}
+
+	_ = cfg
+
+	err = serverConfig.run()
 	if err != nil {
 		return err
 	}
