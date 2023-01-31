@@ -61,8 +61,8 @@ func TestConfig(t *testing.T) {
 			expected: map[string][]HandlerConfig{
 				"/": {
 					{
-						name:     "static",
-						settings: nil,
+						Name:     "static",
+						Settings: nil,
 					},
 				},
 			},
@@ -72,8 +72,8 @@ func TestConfig(t *testing.T) {
 			expected: map[string][]HandlerConfig{
 				"/": {
 					{
-						name: "static",
-						settings: map[string]string{
+						Name: "static",
+						Settings: map[string]string{
 							"body": "foo bar bla",
 						},
 					},
@@ -85,8 +85,8 @@ func TestConfig(t *testing.T) {
 			expected: map[string][]HandlerConfig{
 				"/api": {
 					{
-						name:     "static",
-						settings: nil,
+						Name:     "static",
+						Settings: nil,
 					},
 				},
 			},

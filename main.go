@@ -90,11 +90,6 @@ func (s *serverConfig) getServer() (*http.Server, error) {
 		return nil, err
 	}
 
-	handler, err := s.getHandler()
-	if err != nil {
-		return nil, err
-	}
-
 	// set default addr
 	if s.addr == "" {
 		if tlsConfig == nil {
@@ -122,7 +117,6 @@ func (s *serverConfig) getServer() (*http.Server, error) {
 
 	srv := &http.Server{
 		Addr:              s.addr,
-		Handler:           handler,
 		TLSConfig:         tlsConfig,
 		ReadTimeout:       s.readTimeout,
 		ReadHeaderTimeout: s.readHeaderTimeout,
@@ -134,11 +128,14 @@ func (s *serverConfig) getServer() (*http.Server, error) {
 	return srv, nil
 }
 
-func (s *serverConfig) run() error {
+func (s *serverConfig) run(handler http.Handler) error {
 	srv, err := s.getServer()
 	if err != nil {
 		return err
 	}
+
+	srv.Handler = handler
+
 	if srv.TLSConfig == nil {
 		return srv.ListenAndServe()
 	} else {
@@ -194,6 +191,43 @@ func (t *tlsConfig) getConfig() (*tls.Config, error) {
 	return nil, nil
 }
 
+func buildHanlderChain(cfgChain []config.HandlerConfig) (http.Handler, error) {
+	if len(cfgChain) == 0 {
+		return http.HandlerFunc(okHandler), nil
+	}
+	mws := []middleware{}
+	for _, mw := range cfgChain[:len(cfgChain)-1] {
+		middlewareHandler, ok := middlewares[mw.Name]
+		if !ok {
+			return nil, fmt.Errorf("could not find middleware: %s", mw.Name)
+		}
+		mws = append(mws, middlewareHandler)
+	}
+	handlerCfg := cfgChain[len(cfgChain)-1]
+	handler, ok := handlers[handlerCfg.Name]
+	if !ok {
+		return nil, fmt.Errorf("handler %s not found", handlerCfg.Name)
+	}
+	return chain(mws...)(handler), nil
+}
+
+func getHandler(cfg map[string][]config.HandlerConfig) (http.Handler, error) {
+	// we don't use a mux if there is only the root
+	if chain, ok := cfg["/"]; len(cfg) == 1 && ok {
+		return buildHanlderChain(chain)
+	}
+
+	mux := http.NewServeMux()
+	for path, chain := range cfg {
+		handler, err := buildHanlderChain(chain)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle(path, handler)
+	}
+	return mux, nil
+}
+
 func run() error {
 	// fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	// fs.Usage = func() {
@@ -211,9 +245,12 @@ func run() error {
 		return err
 	}
 
-	_ = cfg
+	handler, err := getHandler(cfg)
+	if err != nil {
+		return err
+	}
 
-	err = serverConfig.run()
+	err = serverConfig.run(handler)
 	if err != nil {
 		return err
 	}

@@ -183,8 +183,8 @@ func (p *parser) parseSettings() (map[string]string, error) {
 }
 
 type HandlerConfig struct {
-	name     string
-	settings map[string]string
+	Name     string
+	Settings map[string]string
 }
 
 func (p *parser) parse() (map[string][]HandlerConfig, error) {
@@ -215,7 +215,7 @@ func (p *parser) parse() (map[string][]HandlerConfig, error) {
 
 		// handler / middleware
 		config := HandlerConfig{
-			name: word,
+			Name: word,
 		}
 
 		c, ok := p.peek()
@@ -224,7 +224,7 @@ func (p *parser) parse() (map[string][]HandlerConfig, error) {
 			if err != nil {
 				return nil, err
 			}
-			config.settings = settings
+			config.Settings = settings
 		}
 
 		mappings[currentPath] = append(mappings[currentPath], config)
