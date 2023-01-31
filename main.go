@@ -193,7 +193,7 @@ func (t *tlsConfig) getConfig() (*tls.Config, error) {
 
 func buildHanlderChain(cfgChain []config.HandlerConfig) (http.Handler, error) {
 	if len(cfgChain) == 0 {
-		return http.HandlerFunc(okHandler), nil
+		return logRequest(http.HandlerFunc(okHandler)), nil
 	}
 	mws := []middleware{}
 	for _, mw := range cfgChain[:len(cfgChain)-1] {
@@ -212,6 +212,10 @@ func buildHanlderChain(cfgChain []config.HandlerConfig) (http.Handler, error) {
 }
 
 func getHandler(cfg map[string][]config.HandlerConfig) (http.Handler, error) {
+	if len(cfg) == 0 {
+		return http.HandlerFunc(okHandler), nil
+	}
+
 	// we don't use a mux if there is only the root
 	if chain, ok := cfg["/"]; len(cfg) == 1 && ok {
 		return buildHanlderChain(chain)
