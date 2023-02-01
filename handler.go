@@ -10,7 +10,7 @@ import (
 
 var handlers = map[string]http.HandlerFunc{
 	"info": infoHandler,
-	"ok":   okHandler,
+	"ok":   (&staticResponseHandler{}).ServeHTTP,
 	"echo": echoHandler,
 }
 
@@ -27,8 +27,16 @@ func infoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func okHandler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("ok\n"))
+type staticResponseHandler struct {
+	body   []byte
+	code   int
+	header http.Header
+}
+
+func (s *staticResponseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	appendHeader(w.Header(), s.header)
+	w.WriteHeader(s.code)
+	w.Write(s.body)
 }
 
 func echoHandler(w http.ResponseWriter, r *http.Request) {
@@ -51,5 +59,13 @@ func newRequest(r *http.Request) *request {
 		Protocol:   r.Proto,
 		Header:     r.Header,
 		RemoteAddr: r.RemoteAddr,
+	}
+}
+
+func appendHeader(dst http.Header, src http.Header) {
+	for header, values := range src {
+		for _, value := range values {
+			dst.Add(header, value)
+		}
 	}
 }
