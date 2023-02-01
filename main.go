@@ -45,43 +45,7 @@ func (s *serverConfig) bindFlags(fs *flag.FlagSet) {
 	fs.DurationVar(&s.writeTimeout, "write-timeout", s.writeTimeout, "write timeout")
 	fs.DurationVar(&s.idleTimeout, "idle-timeout", s.idleTimeout, "idle timeout")
 	fs.BoolVar(&s.connLog, "conn-log", s.connLog, "enable connection log")
-	fs.StringVar(&s.handler, "handler", s.handler, "handler")
-	fs.StringVar(&s.middleware, "middleware", s.middleware, "middleware")
 	s.tlsConfig.bindFlags(fs)
-}
-
-func (s *serverConfig) getHandler() (http.Handler, error) {
-	var (
-		handler         http.HandlerFunc
-		middlewareChain []middleware
-	)
-
-	handler = okHandler
-
-	if s.middleware == "" {
-		// set default middleware
-		middlewareChain = []middleware{
-			dumpRequest,
-		}
-	} else {
-		for _, middlewareName := range strings.Split(s.middleware, ",") {
-			middleware, ok := middlewares[middlewareName]
-			if !ok {
-				return nil, fmt.Errorf("middleware '%s' does not exist", middlewareName)
-			}
-			middlewareChain = append(middlewareChain, middleware)
-		}
-	}
-
-	if s.handler != "" {
-		var ok bool
-		handler, ok = handlers[s.handler]
-		if !ok {
-			return nil, fmt.Errorf("handler '%s' does not exist", s.handler)
-		}
-	}
-
-	return chain(middlewareChain...)(handler), nil
 }
 
 func (s *serverConfig) getServer() (*http.Server, error) {
@@ -193,7 +157,7 @@ func (t *tlsConfig) getConfig() (*tls.Config, error) {
 
 func buildHanlderChain(cfgChain []config.HandlerConfig) (http.Handler, error) {
 	if len(cfgChain) == 0 {
-		return logRequest(http.HandlerFunc(okHandler)), nil
+		return logRequest(newStaticResponseHandler().ServeHTTP), nil
 	}
 	mws := []middleware{}
 	for _, mw := range cfgChain[:len(cfgChain)-1] {
@@ -204,16 +168,20 @@ func buildHanlderChain(cfgChain []config.HandlerConfig) (http.Handler, error) {
 		mws = append(mws, middlewareHandler)
 	}
 	handlerCfg := cfgChain[len(cfgChain)-1]
-	handler, ok := handlers[handlerCfg.Name]
+	handlerFactory, ok := handlers[handlerCfg.Name]
 	if !ok {
 		return nil, fmt.Errorf("handler %s not found", handlerCfg.Name)
 	}
-	return chain(mws...)(handler), nil
+	handler, err := handlerFactory(handlerCfg.Settings)
+	if err != nil {
+		return nil, fmt.Errorf("invalid configuration in '%s' handler: %w", handlerCfg.Name, err)
+	}
+	return chain(mws...)(handler.ServeHTTP), nil
 }
 
 func getHandler(cfg map[string][]config.HandlerConfig) (http.Handler, error) {
 	if len(cfg) == 0 {
-		return http.HandlerFunc(okHandler), nil
+		return logRequest(newStaticResponseHandler().ServeHTTP), nil
 	}
 
 	// we don't use a mux if there is only the root

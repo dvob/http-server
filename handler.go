@@ -2,16 +2,40 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 )
 
-var handlers = map[string]http.HandlerFunc{
-	"info": infoHandler,
-	"ok":   (&staticResponseHandler{}).ServeHTTP,
-	"echo": echoHandler,
+type handlerFactory func(map[string]string) (http.Handler, error)
+
+func noConfigFactory(handler http.HandlerFunc) handlerFactory {
+	return func(_ map[string]string) (http.Handler, error) {
+		return handler, nil
+	}
+}
+
+var handlers = map[string]handlerFactory{
+	"info": noConfigFactory(infoHandler),
+	"static": func(config map[string]string) (http.Handler, error) {
+		handler := newStaticResponseHandler()
+		if body, ok := config["body"]; ok {
+			handler.body = []byte(body)
+		}
+		if code, ok := config["code"]; ok {
+			num, err := strconv.Atoi(code)
+			if err != nil {
+				return nil, fmt.Errorf("invalid status code '%s'", code)
+			}
+			handler.code = num
+		}
+
+		return handler, nil
+	},
+	"echo": noConfigFactory(echoHandler),
 }
 
 func infoHandler(w http.ResponseWriter, r *http.Request) {
@@ -28,13 +52,18 @@ func infoHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type staticResponseHandler struct {
-	body   []byte
-	code   int
-	header http.Header
+	body []byte
+	code int
+}
+
+func newStaticResponseHandler() *staticResponseHandler {
+	return &staticResponseHandler{
+		body: []byte("ok\n"),
+		code: 200,
+	}
 }
 
 func (s *staticResponseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	appendHeader(w.Header(), s.header)
 	w.WriteHeader(s.code)
 	w.Write(s.body)
 }
