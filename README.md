@@ -29,13 +29,19 @@ There are two things you can configure for each path:
 A request then runs through each middleware in the order in which the middlewares are specified and at the end a handler produces the response.
 In the following example a request would first run through the `log` and `json` middleware and then the `static` handler would produce the response.
 ```
-http-server log json static 
+http-server log json static
 ```
+It's recommended to always use single quotes for the config. They are not needed but if you later use more complex configurations the quoting of the shell can easily mess up your configuration.
 
 You can specify a paths as follows. In the following example requests to `/info` would run through the `log` middleware and then the `info` handler would return some information about the host and the request.
 Every other request (`/`) would be sent through the  `log` middleware and then return the `static` handler would return a static response (`ok`).
 ```
-http-server /info: log info /: log static
+http-server '/info: log info /: log static'
+```
+
+You can also configure the indidual handlers. The following example returns `foo` on the path `/foo` and a `404` not found error with the text `here is nothing` on every other path.
+```
+http-server '/foo: log static{body: foo} /: log static{body: "here is nothing", code: 404}'
 ```
 
 ## TLS
