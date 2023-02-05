@@ -1,17 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"crypto/tls"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,8 +23,6 @@ type serverConfig struct {
 	idleTimeout       time.Duration
 	maxHeaderBytes    int
 	tlsConfig         tlsConfig
-	middleware        string
-	handler           string
 	connLog           bool
 }
 
@@ -204,7 +198,22 @@ func getHandler(cfg map[string][]config.HandlerConfig) (http.Handler, error) {
 	return mux, nil
 }
 
+func listOptions() {
+	fmt.Println("handlers:")
+	for handler := range handlers {
+		fmt.Println(handler)
+	}
+	fmt.Println()
+
+	fmt.Println("middlewares:")
+	for middleware := range middlewares {
+		fmt.Println(middleware)
+	}
+}
+
 func run() error {
+	// list handlers and middlewares
+	var list bool
 	// fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	// fs.Usage = func() {
 	// 	// TODO: extend with description of handlers and middlewares
@@ -214,7 +223,13 @@ func run() error {
 
 	serverConfig := newDefaultServer()
 	serverConfig.bindFlags(flag.CommandLine)
+	flag.BoolVar(&list, "list", false, "list available handlers and middlewares")
 	flag.Parse()
+
+	if list {
+		listOptions()
+		return nil
+	}
 
 	cfg, err := config.ParseArgs(flag.Args())
 	if err != nil {
@@ -239,148 +254,4 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-}
-
-func old_main() {
-	var (
-		jsonMode   bool
-		hecMode    bool
-		enableTLS  bool
-		tlsCert    string
-		tlsKey     string
-		listenAddr string
-	)
-
-	cfg := Config{
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
-	}
-
-	flag.BoolVar(&jsonMode, "json", false, "Parse body as json")
-	flag.BoolVar(&enableTLS, "tls", false, "Enable TLS")
-	flag.BoolVar(&cfg.ShowHeaders, "header", true, "show headers")
-	flag.BoolVar(&hecMode, "hec", false, "HTTP Event Collector Mode")
-	flag.BoolVar(&cfg.Info, "info", false, "Return request info as content")
-	flag.BoolVar(&cfg.EnableTimeout, "timeout", false, "enable timeout endpoint (e.g. */timeout?duration=12s)")
-	flag.BoolVar(&cfg.EnableData, "data", false, "Enable data endpoint (e.g */data?size=123)")
-	flag.StringVar(&cfg.Content, "content", "", "Body which gets returned")
-	flag.StringVar(&tlsCert, "cert", "tls.crt", "TLS certificate")
-	flag.StringVar(&tlsKey, "key", "tls.key", "TLS key")
-	flag.StringVar(&listenAddr, "addr", ":8080", "Listen address")
-	flag.Parse()
-}
-
-type Config struct {
-	Stdout        io.Writer
-	Stderr        io.Writer
-	Content       string
-	Info          bool
-	ShowHeaders   bool
-	EnableTimeout bool
-	EnableData    bool
-}
-
-func RawHandler(cfg Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-		if cfg.EnableTimeout && strings.HasSuffix(r.URL.Path, "/timeout") {
-			return
-		}
-		if cfg.EnableData && strings.HasSuffix(r.URL.Path, "/data") {
-			dataHandler(w, r)
-			return
-		}
-
-		_, err := io.Copy(cfg.Stdout, r.Body)
-		if err != nil {
-			fmt.Fprintln(cfg.Stderr, err)
-		}
-
-		return
-	}
-}
-
-func HECHandler(cfg Config) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		scanner := bufio.NewScanner(r.Body)
-		for scanner.Scan() {
-			payload := make(map[string]interface{})
-			err := json.Unmarshal([]byte(scanner.Text()), &payload)
-			if err != nil {
-				fmt.Fprintln(cfg.Stderr, "failed to parse event:", err)
-				continue
-			}
-			enc := json.NewEncoder(cfg.Stdout)
-			enc.SetIndent("", "  ")
-			err = enc.Encode(payload)
-			if err != nil {
-				fmt.Fprintln(cfg.Stderr, err)
-				return
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintln(cfg.Stderr, err)
-		}
-		return
-	}
-}
-
-func dataHandler(w http.ResponseWriter, r *http.Request) {
-	var err error
-	sizeStr := r.URL.Query().Get("size")
-	size := 0
-	if sizeStr != "" {
-		size, err = strconv.Atoi(sizeStr)
-		if err != nil {
-			http.Error(w, "invalid size: "+err.Error(), 400)
-			return
-		}
-	}
-
-	switch r.Method {
-	case "POST":
-		received, err := io.Copy(os.Stdout, r.Body)
-		if err != nil {
-			log.Printf("failed to read request body: %s", err)
-			http.Error(w, "failed to read body: "+err.Error(), 400)
-		}
-		fmt.Fprintln(w, strconv.FormatInt(received, 10))
-		return
-	case "GET":
-		_, err := io.Copy(w, newNBytesReader(size))
-		if err != nil {
-			http.Error(w, "failed to send data", 500)
-			return
-		}
-	default:
-		http.Error(w, "method not allowed", 405)
-		return
-	}
-	return
-}
-
-func newNBytesReader(size int) *nBytesReader {
-	return &nBytesReader{
-		n: size,
-	}
-}
-
-type nBytesReader struct {
-	// total bytes to return
-	n int
-	// already returned bytes
-	sent int
-}
-
-func (n *nBytesReader) Read(p []byte) (int, error) {
-	sent := 0
-	for ; sent < len(p) && n.sent < n.n; sent++ {
-		p[sent] = 'A'
-		n.sent++
-	}
-	if n.sent == n.n {
-		return sent, io.EOF
-	}
-	return sent, nil
 }

@@ -34,10 +34,10 @@ func (p *parser) peek() (byte, bool) {
 func (p *parser) consume(chr byte) error {
 	nextChr, ok := p.peek()
 	if !ok {
-		return fmt.Errorf("unexpected EOF. expected %c", chr)
+		return fmt.Errorf("unexpected EOF. expected '%c'", chr)
 	}
 	if nextChr != chr {
-		return fmt.Errorf("unexpected %c at offset %d. expected %c.", nextChr, p.pos+1, chr)
+		return fmt.Errorf("unexpected '%c' at offset %d expected '%c'", nextChr, p.pos+1, chr)
 	}
 	p.next()
 	return nil
@@ -59,24 +59,6 @@ func (p *parser) skipSpace() {
 		}
 		break
 	}
-}
-
-func (p *parser) readStrUntil(chrs []byte) string {
-	start := p.pos
-OUTER:
-	for {
-		c, ok := p.peek()
-		if !ok {
-			break
-		}
-		for _, chrToLookFor := range chrs {
-			if c == chrToLookFor {
-				break OUTER
-			}
-		}
-		p.next()
-	}
-	return string(p.input[start:p.pos])
 }
 
 func (p *parser) readQuotedString() (string, error) {

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strconv"
 )
@@ -18,6 +21,7 @@ func noConfigFactory(handler http.HandlerFunc) handlerFactory {
 	}
 }
 
+// TODO: use register and move init logic to handler
 var handlers = map[string]handlerFactory{
 	"info": noConfigFactory(infoHandler),
 	"static": func(config map[string]string) (http.Handler, error) {
@@ -36,6 +40,30 @@ var handlers = map[string]handlerFactory{
 		return handler, nil
 	},
 	"echo": noConfigFactory(echoHandler),
+	"proxy": func(config map[string]string) (http.Handler, error) {
+		target, ok := config["target"]
+		if !ok {
+			return nil, fmt.Errorf("missing configuration 'target'")
+		}
+
+		targetURL, err := url.Parse(target)
+		if err != nil {
+			return nil, err
+		}
+		proxy := httputil.NewSingleHostReverseProxy(targetURL)
+		return proxy, nil
+	},
+	"hec":  noConfigFactory(hecHandler),
+	"data": noConfigFactory(dataHandler),
+	"fs": func(config map[string]string) (http.Handler, error) {
+		file, ok := config["file"]
+		if !ok {
+			return nil, fmt.Errorf("missing configuration 'file'")
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, file)
+		}), nil
+	},
 }
 
 func infoHandler(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +100,70 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, r.Body)
 }
 
+func hecHandler(w http.ResponseWriter, r *http.Request) {
+	scanner := bufio.NewScanner(r.Body)
+	for scanner.Scan() {
+		var payload any
+		err := json.Unmarshal([]byte(scanner.Text()), &payload)
+		if err != nil {
+			log.Print("failed to parse event")
+			continue
+		}
+		out, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(out))
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Print(err)
+	}
+}
+
+func dataHandler(w http.ResponseWriter, r *http.Request) {
+	var err error
+	sizeStr := r.URL.Query().Get("size")
+	size := 0
+	if sizeStr != "" {
+		size, err = strconv.Atoi(sizeStr)
+		if err != nil {
+			http.Error(w, "invalid size: "+err.Error(), 400)
+			return
+		}
+	}
+
+	_, err = io.Copy(w, newNBytesReader(size))
+	if err != nil {
+		log.Print(err)
+	}
+}
+
+func newNBytesReader(size int) *nBytesReader {
+	return &nBytesReader{
+		n: size,
+	}
+}
+
+type nBytesReader struct {
+	// total bytes to return
+	n int
+	// already returned bytes
+	sent int
+}
+
+func (n *nBytesReader) Read(p []byte) (int, error) {
+	sent := 0
+	for ; sent < len(p) && n.sent < n.n; sent++ {
+		p[sent] = 'A'
+		n.sent++
+	}
+	if n.sent == n.n {
+		return sent, io.EOF
+	}
+	return sent, nil
+}
+
 type request struct {
 	Method     string      `json:"method"`
 	URI        string      `json:"uri"`
@@ -88,13 +180,5 @@ func newRequest(r *http.Request) *request {
 		Protocol:   r.Proto,
 		Header:     r.Header,
 		RemoteAddr: r.RemoteAddr,
-	}
-}
-
-func appendHeader(dst http.Header, src http.Header) {
-	for header, values := range src {
-		for _, value := range values {
-			dst.Add(header, value)
-		}
 	}
 }

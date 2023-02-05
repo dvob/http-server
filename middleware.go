@@ -26,6 +26,16 @@ var middlewares = map[string]middlewareFactory{
 	"req":     noConfig[middleware](dumpRequest),
 	"log":     noConfig[middleware](logRequest),
 	"json":    noConfig[middleware](jsonLogger),
+	"header": func(config map[string]string) (middleware, error) {
+		return func(next http.HandlerFunc) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				for key, value := range config {
+					r.Header.Add(key, value)
+				}
+				next.ServeHTTP(w, r)
+			}
+		}, nil
+	},
 }
 
 type middleware func(http.HandlerFunc) http.HandlerFunc
@@ -69,6 +79,7 @@ func logRequest(next http.HandlerFunc) http.HandlerFunc {
 		)
 	}
 }
+
 func dumpRequest(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req, _ := httputil.DumpRequest(r, false)
