@@ -13,11 +13,19 @@ import (
 	"github.com/felixge/httpsnoop"
 )
 
-var middlewares = map[string]middleware{
-	"timeout": timeout,
-	"req":     dumpRequest,
-	"log":     logRequest,
-	"json":    jsonLogger,
+type middlewareFactory func(config map[string]string) (middleware, error)
+
+func noConfig[T any](t T) func(map[string]string) (T, error) {
+	return func(_ map[string]string) (T, error) {
+		return t, nil
+	}
+}
+
+var middlewares = map[string]middlewareFactory{
+	"timeout": noConfig[middleware](timeout),
+	"req":     noConfig[middleware](dumpRequest),
+	"log":     noConfig[middleware](logRequest),
+	"json":    noConfig[middleware](jsonLogger),
 }
 
 type middleware func(http.HandlerFunc) http.HandlerFunc

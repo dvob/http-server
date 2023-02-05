@@ -161,9 +161,13 @@ func buildHanlderChain(cfgChain []config.HandlerConfig) (http.Handler, error) {
 	}
 	mws := []middleware{}
 	for _, mw := range cfgChain[:len(cfgChain)-1] {
-		middlewareHandler, ok := middlewares[mw.Name]
+		middlewareHandlerFactory, ok := middlewares[mw.Name]
 		if !ok {
 			return nil, fmt.Errorf("could not find middleware: %s", mw.Name)
+		}
+		middlewareHandler, err := middlewareHandlerFactory(mw.Settings)
+		if err != nil {
+			return nil, fmt.Errorf("failed to configure middleware %s: %w", mw.Name, err)
 		}
 		mws = append(mws, middlewareHandler)
 	}
