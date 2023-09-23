@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 )
 
 type handlerFactory func(map[string]string) (http.Handler, error)
@@ -50,8 +54,30 @@ var handlers = map[string]handlerFactory{
 		if err != nil {
 			return nil, err
 		}
-		proxy := httputil.NewSingleHostReverseProxy(targetURL)
-		return proxy, nil
+
+		http11Upstream := httputil.NewSingleHostReverseProxy(targetURL)
+		http11Transport := http.DefaultTransport.(*http.Transport).Clone()
+		http11Transport.ForceAttemptHTTP2 = false
+		http11Transport.TLSNextProto = make(map[string]func(authority string, c *tls.Conn) http.RoundTripper)
+		http11Transport.TLSClientConfig = &tls.Config{}
+		http11Transport.TLSClientConfig.InsecureSkipVerify = true
+		http11Upstream.Transport = http11Transport
+
+		defaultUpstream := httputil.NewSingleHostReverseProxy(targetURL)
+		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+		defaultTransport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		defaultUpstream.Transport = defaultTransport
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Upgrade is only supported by HTTP/1.1
+			if r.Proto == "HTTP/1.1" && r.Header.Get("Upgrade") != "" {
+				http11Upstream.ServeHTTP(w, r)
+			} else {
+				defaultUpstream.ServeHTTP(w, r)
+			}
+		}), nil
 	},
 	"hec":  noConfigFactory(hecHandler),
 	"data": noConfigFactory(dataHandler),
@@ -67,12 +93,17 @@ var handlers = map[string]handlerFactory{
 }
 
 func infoHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "application/json")
 	info := struct {
-		Hostname string   `json:"hostname"`
-		Request  *request `json:"request"`
+		Hostname string               `json:"hostname"`
+		Request  *request             `json:"request"`
+		TLS      *tls.ConnectionState `json:"tls"`
+		JWT      *jwt                 `json:"jwt"`
 	}{}
 	info.Hostname, _ = os.Hostname()
 	info.Request = newRequest(r)
+	info.TLS = r.TLS
+	info.JWT = readJWT(r)
 	err := json.NewEncoder(w).Encode(info)
 	if err != nil {
 		log.Println("failed to encode json:", err)
@@ -166,6 +197,7 @@ func (n *nBytesReader) Read(p []byte) (int, error) {
 
 type request struct {
 	Method     string      `json:"method"`
+	Host       string      `json:"host"`
 	URI        string      `json:"uri"`
 	Protocol   string      `json:"protocol"`
 	Header     http.Header `json:"header"`
@@ -176,9 +208,65 @@ type request struct {
 func newRequest(r *http.Request) *request {
 	return &request{
 		Method:     r.Method,
+		Host:       r.Host,
 		URI:        r.RequestURI,
 		Protocol:   r.Proto,
 		Header:     r.Header,
 		RemoteAddr: r.RemoteAddr,
 	}
+}
+
+type jwt struct {
+	Header   map[string]any `json:"header,omitempty"`
+	Claims   map[string]any `json:"claims,omitempty"`
+	Expiry   time.Time      `json:"expiry,omitempty"`
+	IssuedAt time.Time      `json:"issued_at,omitempty"`
+	Error    string         `json:"error,omitempty"`
+}
+
+func readJWT(r *http.Request) *jwt {
+	_, token, found := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !found {
+		return nil
+	}
+
+	parts := strings.SplitN(token, ".", 3)
+	if len(parts) != 3 {
+		return nil
+	}
+
+	jwt := &jwt{}
+
+	header, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		jwt.Error = err.Error()
+		return jwt
+	}
+	claims, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		jwt.Error = err.Error()
+		return jwt
+	}
+
+	err = json.Unmarshal(header, &jwt.Header)
+	if err != nil {
+		jwt.Error = err.Error()
+		return jwt
+	}
+	err = json.Unmarshal(claims, &jwt.Claims)
+	if err != nil {
+		jwt.Error = err.Error()
+		return jwt
+	}
+
+	if exp, ok := jwt.Claims["exp"]; ok {
+		expTime, _ := exp.(float64)
+		jwt.Expiry = time.Unix(int64(expTime), 0)
+	}
+	if iat, ok := jwt.Claims["iat"]; ok {
+		iatTime, _ := iat.(float64)
+		jwt.IssuedAt = time.Unix(int64(iatTime), 0)
+	}
+
+	return jwt
 }

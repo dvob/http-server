@@ -69,9 +69,10 @@ func logRequest(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		m := httpsnoop.CaptureMetrics(next, w, r)
 		log.Printf(
-			"src=%s method=%s url=%s code=%d dt=%s written=%d",
+			"src=%s method=%s proto=%s url=%s code=%d dt=%s written=%d",
 			r.RemoteAddr,
 			r.Method,
+			r.Proto,
 			r.URL,
 			m.Code,
 			m.Duration,
