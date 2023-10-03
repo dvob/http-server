@@ -55,20 +55,34 @@ var handlers = map[string]handlerFactory{
 			return nil, err
 		}
 
-		http11Upstream := httputil.NewSingleHostReverseProxy(targetURL)
+		rewriteFunc := func(pr *httputil.ProxyRequest) {
+			pr.SetURL(targetURL)
+			pr.SetXForwarded()
+			// pr.Out.Host = pr.In.Host
+		}
+
+		// prepare reverse proxy for HTTP/1.1
 		http11Transport := http.DefaultTransport.(*http.Transport).Clone()
 		http11Transport.ForceAttemptHTTP2 = false
 		http11Transport.TLSNextProto = make(map[string]func(authority string, c *tls.Conn) http.RoundTripper)
-		http11Transport.TLSClientConfig = &tls.Config{}
-		http11Transport.TLSClientConfig.InsecureSkipVerify = true
-		http11Upstream.Transport = http11Transport
+		http11Transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
 
-		defaultUpstream := httputil.NewSingleHostReverseProxy(targetURL)
+		http11Upstream := &httputil.ReverseProxy{
+			Rewrite:   rewriteFunc,
+			Transport: http11Transport,
+		}
+
+		// prepare default reverse proxy which uses HTTP/2 if the upstream supports it
 		defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
 		defaultTransport.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: true,
 		}
-		defaultUpstream.Transport = defaultTransport
+		defaultUpstream := &httputil.ReverseProxy{
+			Rewrite:   rewriteFunc,
+			Transport: defaultTransport,
+		}
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Upgrade is only supported by HTTP/1.1
@@ -95,15 +109,24 @@ var handlers = map[string]handlerFactory{
 func infoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	info := struct {
-		Hostname string               `json:"hostname"`
-		Request  *request             `json:"request"`
-		TLS      *tls.ConnectionState `json:"tls"`
-		JWT      *jwt                 `json:"jwt"`
+		Hostname    string               `json:"hostname,omitempty"`
+		Request     *request             `json:"request,omitempty"`
+		TLS         *tls.ConnectionState `json:"tls,omitempty"`
+		JWTMetaData map[string][]*jwt    `json:"jwt_metadata,omitempty"`
 	}{}
 	info.Hostname, _ = os.Hostname()
 	info.Request = newRequest(r)
 	info.TLS = r.TLS
-	info.JWT = readJWT(r)
+	info.JWTMetaData = make(map[string][]*jwt)
+	for header, values := range r.Header {
+		for _, value := range values {
+			jwtMetadata := readJWT(value)
+			if jwtMetadata == nil {
+				continue
+			}
+			info.JWTMetaData[header] = append(info.JWTMetaData[header], jwtMetadata)
+		}
+	}
 	err := json.NewEncoder(w).Encode(info)
 	if err != nil {
 		log.Println("failed to encode json:", err)
@@ -224,10 +247,11 @@ type jwt struct {
 	Error    string         `json:"error,omitempty"`
 }
 
-func readJWT(r *http.Request) *jwt {
-	_, token, found := strings.Cut(r.Header.Get("Authorization"), " ")
+func readJWT(tokenHeader string) *jwt {
+	first, token, found := strings.Cut(tokenHeader, " ")
 	if !found {
-		return nil
+		// fallback if there is no auth scheme (e.g. Bearer)
+		token = first
 	}
 
 	parts := strings.SplitN(token, ".", 3)

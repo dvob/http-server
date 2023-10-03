@@ -29,11 +29,12 @@ type serverConfig struct {
 func newDefaultServer() serverConfig {
 	return serverConfig{
 		tlsConfig: newDefaultTLSConfig(),
+		addr:      ":8080",
 	}
 }
 
 func (s *serverConfig) bindFlags(fs *flag.FlagSet) {
-	fs.StringVar(&s.addr, "addr", s.addr, "listen address. if tls is configured this defaults to ':443' otherwise to ':80'")
+	fs.StringVar(&s.addr, "addr", s.addr, "listen address.")
 	fs.DurationVar(&s.readTimeout, "read-timeout", s.readTimeout, "read timeout")
 	fs.DurationVar(&s.readHeaderTimeout, "read-header-timeout", s.readHeaderTimeout, "read header timeout")
 	fs.DurationVar(&s.writeTimeout, "write-timeout", s.writeTimeout, "write timeout")
@@ -46,15 +47,6 @@ func (s *serverConfig) getServer() (*http.Server, error) {
 	tlsConfig, err := s.tlsConfig.getConfig()
 	if err != nil {
 		return nil, err
-	}
-
-	// set default addr
-	if s.addr == "" {
-		if tlsConfig == nil {
-			s.addr = ":80"
-		} else {
-			s.addr = ":443"
-		}
 	}
 
 	var connStateFn func(net.Conn, http.ConnState)
@@ -179,7 +171,7 @@ func buildHanlderChain(cfgChain []config.HandlerConfig) (http.Handler, error) {
 
 func getHandler(cfg map[string][]config.HandlerConfig) (http.Handler, error) {
 	if len(cfg) == 0 {
-		return logRequest(newStaticResponseHandler().ServeHTTP), nil
+		return logRequest(infoHandler), nil
 	}
 
 	// we don't use a mux if there is only the root
