@@ -267,14 +267,12 @@ func readJWT(tokenHeader string) *jwt {
 	}
 	claims, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		jwt.Error = err.Error()
-		return jwt
+		return nil
 	}
 
 	err = json.Unmarshal(header, &jwt.Header)
 	if err != nil {
-		jwt.Error = err.Error()
-		return jwt
+		return nil
 	}
 	err = json.Unmarshal(claims, &jwt.Claims)
 	if err != nil {
