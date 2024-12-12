@@ -1,13 +1,13 @@
 module github.com/dvob/http-server
 
-go 1.19
+go 1.23
 
 require (
-	github.com/felixge/httpsnoop v1.0.3
-	golang.org/x/crypto v0.13.0
+	github.com/felixge/httpsnoop v1.0.4
+	golang.org/x/crypto v0.31.0
 )
 
 require (
-	golang.org/x/net v0.15.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/net v0.32.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 )
