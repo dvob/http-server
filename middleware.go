@@ -36,6 +36,16 @@ var middlewares = map[string]middlewareFactory{
 			}
 		}, nil
 	},
+	"header-out": func(config map[string]string) (middleware, error) {
+		return func(next http.HandlerFunc) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				for key, value := range config {
+					w.Header().Add(key, value)
+				}
+				next.ServeHTTP(w, r)
+			}
+		}, nil
+	},
 }
 
 type middleware func(http.HandlerFunc) http.HandlerFunc
